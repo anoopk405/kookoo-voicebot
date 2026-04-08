@@ -1,0 +1,50 @@
+{
+  "name": "kookoo-voicebot",
+  "version": "1.0.0",
+  "description": "Build AI voice agents on KooKoo (Ozonetel) telephony with ElevenLabs conversational AI. Handle inbound calls, bidirectional audio streaming, and real-time AI responses with zero telephony knowledge.",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "scripts": {
+    "test": "node test/smoke.js"
+  },
+  "keywords": [
+    "kookoo",
+    "ozonetel",
+    "voicebot",
+    "voice-agent",
+    "telephony",
+    "ivr",
+    "elevenlabs",
+    "conversational-ai",
+    "websocket",
+    "pcm-audio",
+    "sip",
+    "cpaas"
+  ],
+  "author": "anoopk405",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anoopk405/kookoo-voicebot"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "ws": "^8.20.0"
+  },
+  "peerDependencies": {
+    "mongoose": ">=8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "mongoose": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ]
+}
