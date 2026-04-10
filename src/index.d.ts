@@ -1,19 +1,40 @@
 import { Express } from 'express';
 import { Server } from 'http';
 
-export interface VoiceBotConfig {
-  sipNumber?: string;
-  port?: number;
-  wsUrl?: string;
-  elevenlabs: {
-    agentId: string;
-    apiKey?: string;
-  };
+export interface ElevenLabsConfig {
+  agentId: string;
+  apiKey?: string;
 }
 
-export interface CallEvent {
+export interface OpenAITool {
+  type: 'function';
+  name: string;
+  description: string;
+  parameters: Record<string, any>;
+}
+
+export interface OpenAIConfig {
+  apiKey: string;
+  model?: string;
+  voice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer';
+  instructions?: string;
+  tools?: OpenAITool[];
+}
+
+export interface VoiceBotConfig {
+  sipNumber?: string;
+  provider?: 'elevenlabs' | 'openai';
+  port?: number;
+  wsUrl?: string;
+  elevenlabs?: ElevenLabsConfig;
+  openai?: OpenAIConfig;
+}
+
+export interface CallStartEvent {
   ucid: string;
   did?: string;
+  callerId?: string;
+  callerDetails?: Record<string, any>;
   metadata?: Record<string, any>;
 }
 
@@ -38,7 +59,7 @@ export interface PostStreamEvent {
 }
 
 export interface VoiceBotHooks {
-  onCallStart?: (event: CallEvent) => void | Promise<void>;
+  onCallStart?: (event: CallStartEvent) => void | Promise<void>;
   onCallEnd?: (event: { ucid: string }) => void | Promise<void>;
   onTranscript?: (event: TranscriptEvent) => void;
   onToolCall?: (event: ToolCallEvent) => any;
@@ -64,6 +85,24 @@ export const xml: {
   hangup(): string;
 };
 
-export function samplesToBase64(samples: number[]): string;
-export function base64ToChunks(base64: string, chunkSize?: number): number[][];
+export class ElevenLabsSession {
+  constructor(opts: any);
+  connect(): void;
+  sendAudio(base64: string): void;
+  close(): void;
+  connected: boolean;
+}
+
+export class OpenAIRealtimeSession {
+  constructor(opts: any);
+  connect(): void;
+  sendAudio(base64: string): void;
+  close(): void;
+  connected: boolean;
+}
+
+export function samplesToBase64(samples: number[], targetRate?: number): string;
+export function base64ToChunks(base64: string, sourceRate?: number, chunkSize?: number): number[][];
+export function samplesToBase64_24k(samples: number[]): string;
+export function base64ToChunks_24k(base64: string, chunkSize?: number): number[][];
 export function buildMediaPacket(ucid: string, samples: number[]): string;

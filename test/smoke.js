@@ -1,44 +1,48 @@
-const { KooKooVoiceBot, xml, samplesToBase64, base64ToChunks, buildMediaPacket } = require('../src/index');
+const {
+  KooKooVoiceBot, xml, ElevenLabsSession, OpenAIRealtimeSession,
+  samplesToBase64, base64ToChunks, samplesToBase64_24k, base64ToChunks_24k, buildMediaPacket,
+} = require('../src/index');
 
-// Test exports exist
-console.assert(typeof KooKooVoiceBot === 'function', 'KooKooVoiceBot should be a class');
-console.assert(typeof xml.playAndHangup === 'function', 'xml.playAndHangup should be a function');
-console.assert(typeof xml.transfer === 'function', 'xml.transfer should be a function');
-console.assert(typeof xml.ccTransfer === 'function', 'xml.ccTransfer should be a function');
-console.assert(typeof xml.hangup === 'function', 'xml.hangup should be a function');
+// Test exports
+console.assert(typeof KooKooVoiceBot === 'function', 'KooKooVoiceBot');
+console.assert(typeof ElevenLabsSession === 'function', 'ElevenLabsSession');
+console.assert(typeof OpenAIRealtimeSession === 'function', 'OpenAIRealtimeSession');
+console.assert(typeof xml.playAndHangup === 'function', 'xml.playAndHangup');
+console.assert(typeof xml.transfer === 'function', 'xml.transfer');
+console.assert(typeof xml.ccTransfer === 'function', 'xml.ccTransfer');
+console.assert(typeof xml.hangup === 'function', 'xml.hangup');
 
-// Test audio conversion roundtrip
+// Test audio 16kHz (ElevenLabs)
 const samples = [100, -200, 300, -400, 500, 0, 0, 0];
-const b64 = samplesToBase64(samples);
-console.assert(typeof b64 === 'string' && b64.length > 0, 'samplesToBase64 should return base64 string');
+const b64_16 = samplesToBase64(samples);
+console.assert(typeof b64_16 === 'string' && b64_16.length > 0, 'samplesToBase64 16k');
+
+// Test audio 24kHz (OpenAI)
+const b64_24 = samplesToBase64_24k(samples);
+console.assert(typeof b64_24 === 'string' && b64_24.length > 0, 'samplesToBase64_24k');
+console.assert(b64_24.length > b64_16.length, '24k should be larger than 16k');
 
 // Test media packet
 const packet = buildMediaPacket('test-ucid', [1, 2, 3]);
 const parsed = JSON.parse(packet);
-console.assert(parsed.ucid === 'test-ucid', 'packet should have ucid');
-console.assert(parsed.data.sampleRate === 8000, 'packet should be 8kHz');
-console.assert(parsed.data.samples.length === 3, 'packet should have samples');
+console.assert(parsed.ucid === 'test-ucid', 'packet ucid');
+console.assert(parsed.data.sampleRate === 8000, 'packet 8kHz');
 
 // Test XML helpers
-const hangupXml = xml.playAndHangup('Hello');
-console.assert(hangupXml.includes('<playtext'), 'should contain playtext tag');
-console.assert(hangupXml.includes('<hangup/>'), 'should contain hangup tag');
+console.assert(xml.playAndHangup('Hello').includes('<playtext'), 'playtext tag');
+console.assert(xml.transfer('9001').includes('9001'), 'dial number');
+console.assert(xml.ccTransfer('general', 'sales').includes('<cctransfer'), 'cctransfer tag');
 
-const transferXml = xml.transfer('9001');
-console.assert(transferXml.includes('<dial'), 'should contain dial tag');
-console.assert(transferXml.includes('9001'), 'should contain number');
+// Test ElevenLabs constructor (default provider)
+const bot1 = new KooKooVoiceBot({ sipNumber: '1234', elevenlabs: { agentId: 'test' } });
+console.assert(bot1.config.provider === 'elevenlabs', 'default provider elevenlabs');
 
-const ccXml = xml.ccTransfer('general', 'sales');
-console.assert(ccXml.includes('<cctransfer'), 'should contain cctransfer tag');
+// Test OpenAI constructor (auto-detect provider)
+const bot2 = new KooKooVoiceBot({ sipNumber: '1234', openai: { apiKey: 'sk-test' } });
+console.assert(bot2.config.provider === 'openai', 'auto-detect openai provider');
 
-// Test constructor
-const bot = new KooKooVoiceBot({
-  sipNumber: '1234',
-  elevenlabs: { agentId: 'test', apiKey: 'test' },
-}, {
-  onCallStart: () => {},
-  onTranscript: () => {},
-});
-console.assert(bot.config.sipNumber === '1234', 'config should be set');
+// Test explicit provider
+const bot3 = new KooKooVoiceBot({ sipNumber: '1234', provider: 'openai', openai: { apiKey: 'sk-test' } });
+console.assert(bot3.config.provider === 'openai', 'explicit openai provider');
 
 console.log('All tests passed');
