@@ -1,7 +1,7 @@
 ---
 name: kookoo-voicebot
-description: "Build and deploy any AI voice agent on KooKoo/Ozonetel telephony with ElevenLabs OR OpenAI Realtime API. Use when the user wants to create ANY phone-based voice application. Supports two AI providers - ElevenLabs (Conversational AI) and OpenAI (GPT-4o Realtime). Generates a complete deployable Node.js app with a /kookoo URL to paste into the KooKoo portal."
-argument-hint: "[describe your voice agent]"
+description: "Build and deploy AI voice agents that answer real phone calls. Use whenever a user wants a voice agent, phone bot, IVR replacement, auto-attendant, appointment booking line, phone support agent, lead qualification bot, voicemail handler, call routing system, multilingual phone agent (Hindi, Telugu, Tamil, etc.), or anything that says 'answer calls with AI', 'AI phone agent', 'phone number that talks', or 'voice agent on a phone number'. Runs on KooKoo/Ozonetel telephony with a choice of two AI providers: ElevenLabs Conversational AI (best voice quality, dashboard-configured prompts) or OpenAI Realtime API (GPT-4o, prompt in code, native function calling). Generates a complete deployable Node.js app with a /kookoo URL to paste into the KooKoo portal."
+argument-hint: "[describe your voice agent] [--openai | --elevenlabs]"
 allowed-tools: Bash(npm *) Bash(node *) Bash(git *) Bash(curl *) Read Write Edit Grep Glob WebFetch
 ---
 
@@ -14,13 +14,17 @@ You are building an AI voice agent that handles real phone calls. The user descr
 The user said: **$ARGUMENTS**
 
 Based on their description, you will:
-1. **Ask which AI provider** they want: ElevenLabs or OpenAI (if not specified, ask)
+1. **Determine the AI provider:**
+   - If `$ARGUMENTS` contains `--openai`, use OpenAI Realtime API
+   - If `$ARGUMENTS` contains `--elevenlabs`, use ElevenLabs Conversational AI
+   - If the user named a provider in prose (e.g. "using OpenAI", "with ElevenLabs"), use that
+   - Otherwise, **default to OpenAI** (no dashboard setup, faster time-to-running agent) and tell the user you chose it — they can switch with `--elevenlabs` if they prefer voice cloning or UI-based prompt editing
 2. Scaffold a complete Node.js project
 3. Install `kookoo-voicebot` from npm
 4. Write `index.js` with the appropriate provider config and hooks
 5. If ElevenLabs: write the agent system prompt to paste in ElevenLabs dashboard
 6. If OpenAI: write the system prompt directly in code (`instructions` field)
-7. Create deployment files (Procfile, .env.example, .gitignore)
+7. Create deployment files (Procfile, nixpacks.toml, .env.example, .gitignore)
 8. Tell them exactly how to deploy and get a working phone number
 
 ---
@@ -37,31 +41,9 @@ npm install kookoo-voicebot
 
 ### 2. Create index.js
 
-The SDK supports two providers. Use whichever the user chose:
+The SDK supports two providers. Use whichever the user chose (or default to OpenAI):
 
-#### Option A: ElevenLabs (agent configured in ElevenLabs dashboard)
-
-```js
-const { KooKooVoiceBot, xml } = require('kookoo-voicebot');
-
-const bot = new KooKooVoiceBot(
-  {
-    sipNumber: process.env.SIP_NUMBER,
-    provider: 'elevenlabs',
-    elevenlabs: {
-      agentId: process.env.ELEVENLABS_AGENT_ID,
-      apiKey: process.env.ELEVENLABS_API_KEY,
-    },
-  },
-  {
-    // Add hooks based on the use case...
-  }
-);
-
-bot.start();
-```
-
-#### Option B: OpenAI Realtime API (system prompt in code, no dashboard needed)
+#### Option A: OpenAI Realtime API (DEFAULT — system prompt in code, no dashboard needed)
 
 ```js
 const { KooKooVoiceBot, xml } = require('kookoo-voicebot');
@@ -88,8 +70,30 @@ const bot = new KooKooVoiceBot(
 bot.start();
 ```
 
-**OpenAI advantages:** System prompt lives in code (no separate dashboard), function calling built-in, GPT-4o intelligence.
-**ElevenLabs advantages:** Better voice quality/cloning, agent configured via UI, no code changes for prompt updates.
+#### Option B: ElevenLabs (agent configured in ElevenLabs dashboard)
+
+```js
+const { KooKooVoiceBot, xml } = require('kookoo-voicebot');
+
+const bot = new KooKooVoiceBot(
+  {
+    sipNumber: process.env.SIP_NUMBER,
+    provider: 'elevenlabs',
+    elevenlabs: {
+      agentId: process.env.ELEVENLABS_AGENT_ID,
+      apiKey: process.env.ELEVENLABS_API_KEY,
+    },
+  },
+  {
+    // Add hooks based on the use case...
+  }
+);
+
+bot.start();
+```
+
+**OpenAI advantages:** System prompt lives in code (no separate dashboard), function calling built-in, GPT-4o intelligence, faster to first working call.
+**ElevenLabs advantages:** Better voice quality/cloning, agent configured via UI, no code changes for prompt updates, better for non-technical prompt owners.
 
 **OpenAI voice options:** `alloy` (neutral), `echo` (male), `fable` (British), `onyx` (deep male), `nova` (female), `shimmer` (soft female).
 
@@ -138,17 +142,17 @@ xml.hangup();                                // just hang up
 
 ### 3. Create .env.example
 
-**For ElevenLabs:**
+**For OpenAI (default):**
 ```
-ELEVENLABS_AGENT_ID=agent_xxxxxxxxxxxx
-ELEVENLABS_API_KEY=sk_xxxxxxxxxxxx
+OPENAI_API_KEY=sk-proj-xxxxxxxxxxxx
 SIP_NUMBER=524431
 PORT=3000
 ```
 
-**For OpenAI:**
+**For ElevenLabs:**
 ```
-OPENAI_API_KEY=sk-proj-xxxxxxxxxxxx
+ELEVENLABS_AGENT_ID=agent_xxxxxxxxxxxx
+ELEVENLABS_API_KEY=sk_xxxxxxxxxxxx
 SIP_NUMBER=524431
 PORT=3000
 ```
@@ -179,6 +183,14 @@ node_modules/
 
 ### 5. Set up the AI provider
 
+#### If using OpenAI (default):
+
+No dashboard needed. Write the system prompt directly in the `instructions` field in code. The user just needs an OpenAI API key with Realtime API access.
+
+For tools/function calling, define them in the `tools` array in config. OpenAI handles STT + LLM + TTS in one connection.
+
+**Voice options:** `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`.
+
 #### If using ElevenLabs:
 
 Write a system prompt and tell the user to:
@@ -193,14 +205,6 @@ Write a system prompt and tell the user to:
 
 **For Indian voice:** Select an Indian English voice in ElevenLabs voice settings, or use voice cloning for a custom Indian voice.
 
-#### If using OpenAI:
-
-No dashboard needed. Write the system prompt directly in the `instructions` field in code. The user just needs an OpenAI API key with Realtime API access.
-
-For tools/function calling, define them in the `tools` array in config. OpenAI handles STT + LLM + TTS in one connection.
-
-**Voice options:** `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`.
-
 #### For both providers:
 
 The `<playtext>` XML tags (used in `onPostStream`) should use `lang="en-IN"` for Indian English or `lang="hi-IN"` for Hindi.
@@ -212,8 +216,8 @@ Tell the user:
 1. **Push to GitHub** — `git init && git add -A && git commit -m "Initial" && git remote add origin <url> && git push -u origin main`
 2. **Deploy on Railway:**
    - Go to railway.com, create new project, connect GitHub repo
-   - For ElevenLabs: set `ELEVENLABS_AGENT_ID`, `ELEVENLABS_API_KEY`, `SIP_NUMBER`
    - For OpenAI: set `OPENAI_API_KEY`, `SIP_NUMBER`
+   - For ElevenLabs: set `ELEVENLABS_AGENT_ID`, `ELEVENLABS_API_KEY`, `SIP_NUMBER`
    - `MONGODB_URI` (if using MongoDB) — paste as a SINGLE LINE, no line breaks
    - Deploy — Railway gives you a URL like `https://your-app.up.railway.app`
 3. **The application URL is:** `https://your-app.up.railway.app/kookoo`
@@ -528,4 +532,4 @@ Tell users who are new to KooKoo:
 4. Paste your deployed app URL: `https://your-railway-app.up.railway.app/kookoo`
 5. **Call the number** — your AI voice agent answers!
 
-The `kookoo-voicebot` SDK handles everything: XML responses, WebSocket audio streaming, format conversion, and ElevenLabs integration. The user just writes the business logic in hooks.
+The `kookoo-voicebot` SDK handles everything: XML responses, WebSocket audio streaming, format conversion, and ElevenLabs/OpenAI integration. The user just writes the business logic in hooks.
