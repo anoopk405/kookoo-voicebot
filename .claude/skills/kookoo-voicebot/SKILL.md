@@ -76,6 +76,47 @@ bot.start();
 
 **Pricing (May 2026):** `gpt-realtime-2` is $32 / 1M audio-input tokens, $64 / 1M audio-output tokens. Default `reasoningEffort: 'low'` for receptionist flows; bump to `'high'` / `'xhigh'` only when complex reasoning is required.
 
+##### Verified gpt-realtime-2 session.update payload (May 2026)
+
+If you bypass the npm SDK and talk to OpenAI directly via WebSocket, this is the
+exact session.update payload the API accepts. Each field below was confirmed
+through live `invalid_request_error` responses — the schema is strict.
+
+```json
+{
+  "type": "session.update",
+  "session": {
+    "type": "realtime",                                  // REQUIRED
+    "model": "gpt-realtime-2",                            // optional, falls back to URL ?model=
+    "instructions": "...",
+    "output_modalities": ["audio"],                       // NOT "modalities" — that's the legacy field
+    "audio": {
+      "input": {
+        "format": { "type": "audio/pcm", "rate": 24000 },
+        "turn_detection": { "type": "semantic_vad" }      // turn_detection nests UNDER audio.input
+      },
+      "output": {
+        "format": { "type": "audio/pcm", "rate": 24000 }, // rate is REQUIRED on output
+        "voice": "alloy"
+      }
+    }
+  }
+}
+```
+
+Common rejections (each verified via API error):
+
+| Mistake | API response |
+|---------|--------------|
+| `session.modalities: ["audio"]` | `Unknown parameter: 'session.modalities'` (renamed to `output_modalities`) |
+| `session.turn_detection: { ... }` | `Unknown parameter: 'session.turn_detection'` (must nest under `audio.input`) |
+| Omitting `session.type` | `Missing required parameter: 'session.type'` |
+| Omitting `audio.output.format.rate` | `Missing required parameter: 'session.audio.output.format.rate'` |
+| `session.reasoning_effort` at root | rejected — config on this is still in flux as of May 2026 |
+
+The npm SDK (`kookoo-voicebot`) handles all this automatically — the schema
+above only matters if you're rolling your own WebSocket handler.
+
 #### Option B: ElevenLabs (agent configured in ElevenLabs dashboard)
 
 ```js
@@ -103,7 +144,43 @@ bot.start();
 
 **OpenAI voice options:** `alloy` (neutral), `echo` (male), `fable` (British), `onyx` (deep male), `nova` (female), `shimmer` (soft female).
 
-#### Option C: OpenAI Translate Bridge (multilingual receptionist, 70+ languages)
+#### Option C: OpenAI Multilingual (single gpt-realtime-2 session) — RECOMMENDED for non-English
+
+When callers may speak any language and the AI should reply in **the caller's same language**. Uses `gpt-realtime-2` alone with audio-in / audio-out and an instruction to "detect the language from the first utterance and reply in that same language." `gpt-realtime` and `gpt-realtime-2` are both natively multilingual — no translation hop is needed.
+
+```
+Caller (lang X, 8 kHz)
+   ↓ resample 8→24 kHz
+gpt-realtime-2 (audio in / audio out, multilingual)
+   ↓ resample 24→8 kHz
+Caller hears reply in lang X
+```
+
+**Why this is the default for non-English calls:**
+- **One** OpenAI session per call (vs three for the translate-bridge pattern).
+- **~500–1000 ms** turn latency (vs ~1.5–2 s with translation hops).
+- **No separate translation step** — the model understands and produces audio in any of its supported languages directly.
+- Production-proven: this is the same approach the existing `provider: 'openai'` path on the `kookoo-voicebot` SDK uses (just on the legacy `gpt-realtime` model with the legacy schema). It handles multilingual conversation including mid-call language switches.
+
+**System prompt template:**
+
+```
+You are a phone receptionist. Detect the language the caller is speaking from
+their first utterance, then continue the entire conversation in THAT SAME
+language. If they switch language mid-call, follow them. Default to English
+if uncertain. Possibilities include English, Hindi, Telugu, Tamil, Kannada,
+Malayalam, Marathi, Bengali, Gujarati, Spanish, French, Arabic.
+Keep replies short (1-3 sentences). Speak naturally; no markdown or lists.
+```
+
+**Env vars:** `OPENAI_API_KEY`. Optionally `MODE=multilingual` if you gate it behind a flag.
+
+**Implementation notes:**
+
+- The `kookoo-voicebot` npm SDK already does this for you via `provider: 'openai'` (legacy schema, defaults to `gpt-4o-realtime-preview`; override with `model: 'gpt-realtime'` or `'gpt-realtime-2'`). For most users this is enough — just set the multilingual instructions and you're done.
+- If you need the new schema's features (e.g. `gpt-realtime-2` with `output_modalities`, semantic_vad turn detection), implement the WS yourself using the verified payload above. A reference implementation lives at `src/services/multilingualHandler.js` in the `kookoo-ai-receptionist` backend.
+
+#### Option D: OpenAI Translate Bridge (multilingual receptionist, 70+ languages)
 
 Use when callers may speak any language and the AI should reply in the **caller's own language**. Three OpenAI sessions are stitched per call:
 
@@ -752,6 +829,13 @@ say "I'm the receptionist" if pressed.
 | Translate-bridge: caller hears nothing | Translate-OUT never opened (auto-detect didn't fire) | Log raw Translate-IN events and look for the `language` field. Set `CALLER_LANGUAGE` explicitly as a fallback. |
 | Translate-bridge: chipmunk / robotic audio | Wrong sample rate (16 kHz instead of 24 kHz) on OpenAI side | OpenAI Realtime + Translate use 24 kHz, NOT 16 kHz. Don't reuse the ElevenLabs 8↔16 helpers. |
 | Translate-bridge: AI replies in caller's language but Translate-OUT mangles it | gpt-realtime-2 ignored the English-only instruction | Tighten the system prompt: "Reply ONLY in English. A separate translator speaks to the caller." |
+| Translate-bridge: session opens, audio sends correctly, but no `session.input_transcript.*` events ever fire | `gpt-realtime-translate` model's auto-VAD did not trigger reliably as of May 2026 | Switch to **MODE=multilingual** (single `gpt-realtime-2` session, audio I/O, natively multilingual). The translate-bridge approach is still experimental — manual commits and explicit `transcription` config are both rejected by the API. |
+| Translate-out swallows audio silently — caller hears nothing | Target language same as source language (e.g. `en→en`) | Either route AI English audio direct to the caller (skip translate-out entirely for English speakers) or only open translate-out once a non-English caller language is detected. The translate model no-ops on same-language pairs. |
+| `Missing required parameter: 'session.type'` from gpt-realtime-2 | New schema requires `session.type: 'realtime'` | Add `type: 'realtime'` inside the `session` object of `session.update`. |
+| `Missing required parameter: 'session.audio.output.format.rate'` | Output format requires explicit rate even when input has it | Set `audio.output.format.rate: 24000`. |
+| `Unknown parameter: 'session.modalities'` from gpt-realtime-2 | Field renamed in the new schema | Use `output_modalities: ["audio"]` instead. |
+| `Unknown parameter: 'session.turn_detection'` from gpt-realtime-2 | Field moved out of session root | Nest under `audio.input.turn_detection: { type: "semantic_vad" }`. |
+| Logs say `mode=multilingual` (or any non-default) but `[CallHandler]` runs | Older Railway deploy still active — current code's mode-routing isn't deployed | Force a redeploy in Railway, then verify with `curl /` and confirm the `commit` field matches the latest pushed commit SHA. |
 
 ---
 
