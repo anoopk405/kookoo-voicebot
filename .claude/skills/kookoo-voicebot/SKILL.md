@@ -360,11 +360,41 @@ Content inside the tag = **SIP registration number**.
 
 ### IVR Webhook: NewCall Event
 
-When KooKoo sends `event=NewCall` to your `/kookoo` endpoint, it includes rich caller data:
+KooKoo hits `/kookoo` with `event=NewCall` in TWO different scenarios. Your code must handle both:
+
+**A) Real call (live phone call from a real caller)** — includes rich caller data:
 
 ```
 GET /kookoo?event=NewCall&sid=21275806501458167&cid=919704665032&called_number=918065740671&operator=Airtel&circle=ANDHRA+PRADESH&cid_type=MOBILE&cid_countryname=India&cid_country=91&cid_e164=%2B919704665032&request_time=2026-04-10+13%3A05%3A02
 ```
+
+**B) "Test Application URL" ping (KooKoo portal probe)** — only `event` is set, no caller data:
+
+```
+GET /kookoo?event=NewCall
+```
+
+→ Full body: `{"event":"NewCall"}` and that's it. **No `sid`, no `cid`, no `called_number`.**
+
+This is the response when an admin clicks "Test" on the IVR URL setting in the KooKoo portal — KooKoo verifies the URL responds with valid XML but never opens a SIP stream, never sends a `start` event, and your WebSocket handler will NOT run. **Do not treat a Test ping as a real call** — don't create DB rows for it, don't increment caller counters. Detect the test ping by checking that `sid`/`cid` are missing or by inspecting all params:
+
+```js
+const isTestPing = !params.sid && !params.cid;
+if (event === 'NewCall' && isTestPing) {
+  // Reply with valid stream XML so the portal test passes,
+  // but skip side effects (DB writes, analytics).
+  res.set('Content-Type', 'text/xml');
+  return res.send(streamXml);
+}
+```
+
+**Distinguishing tests from real calls in logs:**
+
+| Symptom | Meaning |
+|---------|---------|
+| `[KooKoo IVR] event=NewCall sid= cid= process=` followed by no `[WS] New connection` line | Test Application URL ping. Real call did not happen. |
+| `[KooKoo IVR] event=NewCall sid=2127... cid=919...` followed by `[WS] New connection ... mode=...` | Real call connected to your WebSocket. |
+| Real call params logged but no following `[WS] New connection` | KooKoo couldn't open the WebSocket — check `wss://` URL is reachable from the public internet, not blocked by auth, and certificate is valid. |
 
 | Parameter | Description | Example |
 |-----------|-------------|---------|
@@ -641,6 +671,8 @@ say "I'm the receptionist" if pressed.
 | Dashboard shows no calls | MongoDB not connected | Set `MONGODB_URI` in Railway Variables dashboard (not in .env file — Railway doesn't read .env) |
 | Caller number shows as the KooKoo number | Using `did` instead of `call_id` | `did` = your KooKoo number. Use `call_id` from WebSocket start event or `cid` from `x_headers` for the CALLER's number |
 | `x-uui` not found on WebSocket | KooKoo renames it | KooKoo forwards `x-uui` as `x_headers` (JSON string). Parse it: `JSON.parse(message.x_headers)` |
+| Logs show `event=NewCall` with empty `sid=` `cid=` and full params is just `{"event":"NewCall"}` | KooKoo portal "Test Application URL" ping, not a real call | Place an actual phone call to your KooKoo number. Test pings never open the WebSocket and shouldn't create DB rows — gate side effects on `sid && cid` being present. |
+| Real call connects but no `[WS] New connection` log line | KooKoo can't reach your WebSocket URL | Verify the `<stream url>` is `wss://` (not `ws://`), the host is publicly reachable, and there's no Cloudflare/Railway WAF blocking the upgrade. Test with `wscat -c <url>` from outside your network. |
 | Translate-bridge: caller hears wrong / random language | Forwarded the *source* transcript (caller's language) to gpt-realtime-2 | Forward the **translated** transcript (English) to gpt-realtime-2. Source transcript is for logging only. |
 | Translate-bridge: caller hears nothing | Translate-OUT never opened (auto-detect didn't fire) | Log raw Translate-IN events and look for the `language` field. Set `CALLER_LANGUAGE` explicitly as a fallback. |
 | Translate-bridge: chipmunk / robotic audio | Wrong sample rate (16 kHz instead of 24 kHz) on OpenAI side | OpenAI Realtime + Translate use 24 kHz, NOT 16 kHz. Don't reuse the ElevenLabs 8↔16 helpers. |
